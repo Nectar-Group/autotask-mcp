@@ -18,7 +18,8 @@ jobs:
 
       - name: Set image name
         run: |
-          echo "IMAGE=ghcr.io/${GITHUB_REPOSITORY_OWNER}/autotask-mcp-sse:latest" >> $GITHUB_ENV
+          OWNER=$(echo "${GITHUB_REPOSITORY_OWNER}" | tr '[:upper:]' '[:lower:]')
+          echo "IMAGE=ghcr.io/${OWNER}/autotask-mcp-sse:latest" >> $GITHUB_ENV
 
       - name: Log in to GHCR
         uses: docker/login-action@v3
