@@ -174,7 +174,7 @@ export class AutotaskResourceHandler {
    * Parse a resource URI to extract type and ID
    */
   private parseUri(uri: string): { resourceType: string; resourceId?: string } {
-    const match = uri.match(/^autotask:\/\/([^\/]+)(?:\/(.+))?$/);
+    const match = uri.match(/^autotask:\/\/([^/]+)(?:\/(.+))?$/);
     
     if (!match) {
       throw new Error(`Invalid Autotask URI format: ${uri}`);
@@ -193,18 +193,4 @@ export class AutotaskResourceHandler {
     };
   }
 
-  /**
-   * Get available resource templates for documentation
-   */
-  getResourceTemplates(): string[] {
-    return [
-      'autotask://companies',
-      'autotask://companies/{id}',
-      'autotask://contacts',
-      'autotask://contacts/{id}',
-      'autotask://tickets',
-      'autotask://tickets/{id}',
-      'autotask://time-entries'
-    ];
-  }
 } 

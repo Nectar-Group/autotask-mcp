@@ -1,21 +1,69 @@
 # Autotask MCP Server
 
-A [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) server that provides AI assistants with structured access to Kaseya Autotask PSA data and operations.
+[![Build Status](https://github.com/wyre-technology/autotask-mcp/actions/workflows/release.yml/badge.svg)](https://github.com/wyre-technology/autotask-mcp/actions/workflows/release.yml)
+[![codecov](https://codecov.io/gh/wyre-technology/autotask-mcp/graph/badge.svg)](https://codecov.io/gh/wyre-technology/autotask-mcp)
+[![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
+[![Node.js](https://img.shields.io/badge/node-%3E%3D18.0.0-brightgreen.svg)](https://nodejs.org/)
 
-## 🚀 Quick Start
+**Give your AI assistant direct access to Autotask.** Search tickets, create time entries, look up companies, manage projects — all through natural language. No more copy-pasting between browser tabs and chat windows.
 
-**Want to connect to Claude Desktop in 5 minutes?** See our [Quick Start Guide for Claude Desktop](QUICK_START_CLAUDE.md)!
+This is a [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) server that connects Claude (or any MCP-compatible AI) to your Autotask PSA environment. Your AI assistant gets 39 tools covering the operations MSP teams use daily: ticket triage, time logging, company lookups, project management, billing review, and more.
+
+If you run an MSP on Autotask and you're tired of the context-switching tax, this is for you.
+
+> **Part of the [MSP Claude Plugins](https://github.com/wyre-technology/msp-claude-plugins) ecosystem** — a growing suite of AI integrations for the MSP stack including [Datto RMM](https://github.com/wyre-technology/datto-rmm-mcp), [IT Glue](https://github.com/wyre-technology/itglue-mcp), [HaloPSA](https://github.com/wyre-technology/halopsa-mcp), [ConnectWise Automate](https://github.com/wyre-technology/connectwise-automate-mcp), [NinjaOne](https://github.com/wyre-technology/ninjaone-mcp), [Huntress](https://github.com/wyre-technology/huntress-mcp), and more. Built by MSPs, for MSPs.
+
+<a href="https://glama.ai/mcp/servers/@wyre-technology/autotask-mcp">
+  <img width="380" height="200" src="https://glama.ai/mcp/servers/@wyre-technology/autotask-mcp/badge" alt="Autotask MCP server" />
+</a>
+
+## One-Click Deployment
+
+[![Deploy to DO](https://www.deploytodo.com/do-btn-blue.svg)](https://cloud.digitalocean.com/apps/new?repo=https://github.com/wyre-technology/autotask-mcp/tree/main)
+
+[![Deploy to Cloudflare Workers](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/wyre-technology/autotask-mcp)
+
+> **Note — no GitHub Packages token required.** Unlike most WYRE MCP servers,
+> `autotask-mcp` does **not** depend on a private `@wyre-technology/*` package on
+> GitHub Packages. Its only WYRE dependency is the `autotask-node` SDK, declared
+> as a git dependency on the **public** `wyre-technology/autotask-node` repo, which
+> `npm install` resolves anonymously. The DigitalOcean one-click deploy therefore
+> works without any `NODE_AUTH_TOKEN`/`GITHUB_TOKEN` build variable.
+
+## Quick Start
+
+**Claude Desktop** — download, open, done:
+
+1. Download `autotask-mcp.mcpb` from the [latest release](https://github.com/wyre-technology/autotask-mcp/releases/latest)
+2. Open the file (double-click or drag into Claude Desktop)
+3. Enter your Autotask credentials when prompted (Username, Secret, Integration Code)
+
+No terminal, no JSON editing, no Node.js install required.
+
+**Claude Code (CLI):**
+
+```bash
+claude mcp add autotask-mcp \
+  -e AUTOTASK_USERNAME=your-user@company.com \
+  -e AUTOTASK_SECRET=your-secret \
+  -e AUTOTASK_INTEGRATION_CODE=your-code \
+  -- npx -y github:wyre-technology/autotask-mcp
+```
+
+See [Installation](#installation) for Docker and from-source methods.
 
 ## Features
 
 - **🔌 MCP Protocol Compliance**: Full support for MCP resources and tools
-- **🛠️ Comprehensive API Coverage**: Access to companies, contacts, tickets, time entries, and more
+- **🛠️ Comprehensive API Coverage**: 39 tools spanning companies, contacts, tickets, projects, billing items, time entries, notes, attachments, and more
 - **🔍 Advanced Search**: Powerful search capabilities with filters across all entities
 - **📝 CRUD Operations**: Create, read, update operations for core Autotask entities
 - **🔄 ID-to-Name Mapping**: Automatic resolution of company and resource IDs to human-readable names
 - **⚡ Intelligent Caching**: Smart caching system for improved performance and reduced API calls
 - **🔒 Secure Authentication**: Enterprise-grade API security with Autotask credentials
-- **🐳 Docker Ready**: Containerized deployment with Docker and docker-compose
+- **🌐 Dual Transport**: Supports both stdio (local) and HTTP Streamable (remote/Docker) transports
+- **📦 MCPB Packaging**: One-click installation via MCP Bundle for desktop clients
+- **🐳 Docker Ready**: Containerized deployment with HTTP transport and health checks
 - **📊 Structured Logging**: Comprehensive logging with configurable levels and formats
 - **🧪 Test Coverage**: Comprehensive test suite with 80%+ coverage
 
@@ -23,38 +71,133 @@ A [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) server that p
 
 - [Installation](#installation)
 - [Configuration](#configuration)
+  - [Gateway Mode](#gateway-mode)
 - [Usage](#usage)
 - [API Reference](#api-reference)
 - [ID-to-Name Mapping](#id-to-name-mapping)
+- [HTTP Transport](#http-transport)
 - [Docker Deployment](#docker-deployment)
-- [Claude Desktop Integration](#claude-desktop-integration)
+- [Migration Guide](docs/MIGRATION_GUIDE.md)
 - [Development](#development)
 - [Testing](#testing)
+- [Troubleshooting](#troubleshooting)
 - [Contributing](#contributing)
+- [Contributors](#contributors)
 - [License](#license)
 
 ## Installation
 
+### Option 1: MCPB Bundle (Claude Desktop)
+
+The simplest method — no terminal, no JSON editing, no Node.js install required.
+
+1. Download `autotask-mcp.mcpb` from the [latest release](https://github.com/wyre-technology/autotask-mcp/releases/latest)
+2. Open the file (double-click or drag into Claude Desktop)
+3. Enter your Autotask credentials when prompted (Username, Secret, Integration Code)
+
+For **Claude Code (CLI)**, one command:
+
+```bash
+claude mcp add autotask-mcp \
+  -e AUTOTASK_USERNAME=your-user@company.com \
+  -e AUTOTASK_SECRET=your-secret \
+  -e AUTOTASK_INTEGRATION_CODE=your-code \
+  -- npx -y github:wyre-technology/autotask-mcp
+```
+
+### Option 2: Docker
+
+**Local (stdio — for Claude Desktop or Claude Code):**
+
+```json
+{
+  "mcpServers": {
+    "autotask": {
+      "command": "docker",
+      "args": [
+        "run", "--rm", "-i",
+        "-e", "MCP_TRANSPORT=stdio",
+        "-e", "AUTOTASK_USERNAME=your-user@company.com",
+        "-e", "AUTOTASK_SECRET=your-secret",
+        "-e", "AUTOTASK_INTEGRATION_CODE=your-code",
+        "--entrypoint", "node",
+        "ghcr.io/wyre-technology/autotask-mcp:latest",
+        "dist/entry.js"
+      ]
+    }
+  }
+}
+```
+
+**Remote (HTTP Streamable — for server deployments):**
+
+```bash
+docker run -d \
+  --name autotask-mcp \
+  -p 8080:8080 \
+  -e AUTOTASK_USERNAME="your-user@company.com" \
+  -e AUTOTASK_SECRET="your-secret" \
+  -e AUTOTASK_INTEGRATION_CODE="your-code" \
+  --restart unless-stopped \
+  ghcr.io/wyre-technology/autotask-mcp:latest
+
+# Verify
+curl http://localhost:8080/health
+```
+
+Clients connect to `http://host:8080/mcp` using MCP Streamable HTTP transport.
+
+**Gateway Mode (for MCP Gateway deployments):**
+
+When deploying behind an MCP Gateway that injects credentials via HTTP headers:
+
+```bash
+docker run -d \
+  --name autotask-mcp \
+  -p 8080:8080 \
+  -e AUTH_MODE=gateway \
+  --restart unless-stopped \
+  ghcr.io/wyre-technology/autotask-mcp:latest
+```
+
+The gateway injects credentials via headers:
+- `X-API-Key`: Autotask username
+- `X-API-Secret`: Autotask secret
+- `X-Integration-Code`: Autotask integration code
+
+See [Gateway Mode](#gateway-mode) for details.
+
+### Option 3: From Source (Development)
+
+```bash
+git clone https://github.com/wyre-technology/autotask-mcp.git
+cd autotask-mcp
+npm ci && npm run build
+```
+
+Then point your MCP client at `dist/entry.js`:
+
+```json
+{
+  "mcpServers": {
+    "autotask": {
+      "command": "node",
+      "args": ["/path/to/autotask-mcp/dist/entry.js"],
+      "env": {
+        "AUTOTASK_USERNAME": "your-user@company.com",
+        "AUTOTASK_SECRET": "your-secret",
+        "AUTOTASK_INTEGRATION_CODE": "your-code"
+      }
+    }
+  }
+}
+```
+
 ### Prerequisites
 
-- Node.js 18+ (LTS recommended)
-- Valid Autotask API credentials
-- MCP-compatible client (Claude Desktop, Continue, etc.)
-
-### NPM Installation
-
-```bash
-npm install -g autotask-mcp
-```
-
-### From Source
-
-```bash
-git clone https://github.com/asachs01/autotask-mcp.git
-cd autotask-mcp
-npm install
-npm run build
-```
+- Valid Autotask API credentials (API user email, secret, integration code)
+- MCP-compatible client (Claude Desktop, Claude Code, etc.)
+- Docker (for Option 2) or Node.js 18+ (for Option 3)
 
 ## Configuration
 
@@ -63,23 +206,72 @@ npm run build
 Create a `.env` file with your configuration:
 
 ```bash
-# Required Autotask API credentials
+# Required Autotask API credentials (Local Mode)
 AUTOTASK_USERNAME=your-api-user@example.com
 AUTOTASK_SECRET=your-secret-key
 AUTOTASK_INTEGRATION_CODE=your-integration-code
 
 # Optional configuration
-AUTOTASK_API_URL=https://webservices.autotask.net/atservices/1.6/atws.asmx
+# AUTOTASK_API_URL is auto-detected from AUTOTASK_USERNAME via Autotask's
+# unauthenticated zoneInformation endpoint on first connect. Only set this
+# explicitly to override auto-detection (e.g. for an on-prem proxy).
+# AUTOTASK_API_URL=https://webservices2.autotask.net/atservicesrest/
 MCP_SERVER_NAME=autotask-mcp
-MCP_SERVER_VERSION=1.0.0
+
+# Authentication mode
+AUTH_MODE=env               # env (local), gateway (hosted)
+
+# Transport (stdio for local/desktop, http for remote/Docker)
+MCP_TRANSPORT=stdio          # stdio, http
+MCP_HTTP_PORT=8080           # HTTP transport port (only used when MCP_TRANSPORT=http)
+MCP_HTTP_HOST=0.0.0.0        # HTTP transport bind address
 
 # Logging
 LOG_LEVEL=info          # error, warn, info, debug
 LOG_FORMAT=simple       # simple, json
 
+# Search-result name enrichment
+# Max concurrent Autotask API calls used to resolve company/resource names on
+# search results. Kept low to stay under Autotask's per-integration
+# concurrent-thread limit (raising it risks HTTP 429 "thread threshold").
+AUTOTASK_ENHANCE_CONCURRENCY=3
+
 # Environment
 NODE_ENV=production
 ```
+
+### Gateway Mode
+
+When deployed behind an MCP Gateway (e.g., `mcp.wyre.ai`), the server operates in gateway mode where credentials are injected via HTTP headers on each request.
+
+**Enable Gateway Mode:**
+
+```bash
+AUTH_MODE=gateway
+MCP_TRANSPORT=http
+```
+
+**Expected Headers:**
+
+| Header | Description |
+|--------|-------------|
+| `X-API-Key` | Autotask API username (email) |
+| `X-API-Secret` | Autotask API secret key |
+| `X-Integration-Code` | Autotask integration code |
+| `X-API-URL` | (Optional) Custom Autotask API URL |
+
+**Health Check Response (Gateway Mode):**
+
+```json
+{
+  "status": "ok",
+  "transport": "http",
+  "authMode": "gateway",
+  "timestamp": "2026-02-05T10:00:00.000Z"
+}
+```
+
+For detailed migration instructions, see the [Migration Guide](docs/MIGRATION_GUIDE.md).
 
 💡 **Pro Tip**: Copy the above content to a `.env` file in your project root.
 
@@ -97,31 +289,16 @@ For detailed setup instructions, see the [Autotask API documentation](https://ww
 ### Command Line
 
 ```bash
-# Start the MCP server
-autotask-mcp
+# Start the MCP server (stdio transport, for piping to an MCP client)
+node dist/entry.js
 
-# Start with custom configuration
-AUTOTASK_USERNAME=user@example.com autotask-mcp
+# Start with HTTP transport
+MCP_TRANSPORT=http node dist/index.js
 ```
 
 ### MCP Client Configuration
 
-Add to your MCP client configuration (e.g., Claude Desktop):
-
-```json
-{
-  "mcpServers": {
-    "autotask": {
-      "command": "autotask-mcp",
-      "env": {
-        "AUTOTASK_USERNAME": "your-api-user@example.com",
-        "AUTOTASK_SECRET": "your-secret-key",
-        "AUTOTASK_INTEGRATION_CODE": "your-integration-code"
-      }
-    }
-  }
-}
-```
+See [Installation](#installation) for all setup methods.
 
 ## API Reference
 
@@ -139,33 +316,69 @@ Resources provide read-only access to Autotask data:
 
 ### Tools
 
-Tools provide interactive operations:
+The server provides 39 tools for interacting with Autotask:
 
 #### Company Operations
-- `search_companies` - Search companies with filters
-- `create_company` - Create new company
-- `update_company` - Update existing company
+- `autotask_search_companies` - Search companies with filters
+- `autotask_create_company` - Create new company
+- `autotask_update_company` - Update existing company
 
-#### Contact Operations  
-- `search_contacts` - Search contacts with filters
-- `create_contact` - Create new contact
+#### Contact Operations
+- `autotask_search_contacts` - Search contacts with filters
+- `autotask_create_contact` - Create new contact
 
 #### Ticket Operations
-- `search_tickets` - Search tickets with filters
-- `create_ticket` - Create new ticket
+- `autotask_search_tickets` - Search tickets with filters
+- `autotask_get_ticket_details` - Get full ticket details by ID
+- `autotask_create_ticket` - Create new ticket
 
 #### Time Entry Operations
-- `create_time_entry` - Log time entry
+- `autotask_create_time_entry` - Log time entry
+- `autotask_search_time_entries` - Search time entries with filters (resource, ticket, project, date range)
+
+#### Billing Items (Approve and Post Workflow)
+- `autotask_search_billing_items` - Search approved and posted billing items
+- `autotask_get_billing_item` - Get specific billing item by ID
+- `autotask_search_billing_item_approval_levels` - Search multi-level approval records for time entries
+
+#### Project Operations
+- `autotask_search_projects` - Search projects with filters
+- `autotask_create_project` - Create new project
+
+#### Resource Operations
+- `autotask_search_resources` - Search resources (technicians/users)
+
+#### Note Operations
+- `autotask_get_ticket_note` / `autotask_search_ticket_notes` / `autotask_create_ticket_note`
+- `autotask_get_project_note` / `autotask_search_project_notes` / `autotask_create_project_note`
+- `autotask_get_company_note` / `autotask_search_company_notes` / `autotask_create_company_note`
+
+#### Attachment Operations
+- `autotask_get_ticket_attachment` - Get ticket attachment
+- `autotask_search_ticket_attachments` - Search ticket attachments
+
+#### Financial Operations
+- `autotask_get_expense_report` / `autotask_search_expense_reports` / `autotask_create_expense_report`
+- `autotask_get_quote` / `autotask_search_quotes` / `autotask_create_quote`
+- `autotask_search_invoices` - Search invoices
+- `autotask_search_contracts` - Search contracts
+
+#### Configuration Items
+- `autotask_search_configuration_items` - Search configuration items (assets)
+
+#### Task Operations
+- `autotask_search_tasks` - Search project tasks
+- `autotask_create_task` - Create project task
 
 #### Utility Operations
-- `test_connection` - Test API connectivity
+- `autotask_test_connection` - Test API connectivity
 
 ### Example Tool Usage
 
 ```javascript
 // Search for companies
 {
-  "name": "search_companies",
+  "name": "autotask_search_companies",
   "arguments": {
     "searchTerm": "Acme Corp",
     "isActive": true,
@@ -175,7 +388,7 @@ Tools provide interactive operations:
 
 // Create a new ticket
 {
-  "name": "create_ticket",
+  "name": "autotask_create_ticket",
   "arguments": {
     "companyID": 12345,
     "title": "Server maintenance request",
@@ -207,15 +420,9 @@ All search and detail tools automatically include an `_enhanced` field with reso
 }
 ```
 
-### Mapping Tools
+### How It Works
 
-Additional tools are available for direct ID-to-name resolution:
-
-- **`get_company_name`** - Get company name by ID
-- **`get_resource_name`** - Get resource (user) name by ID  
-- **`get_mapping_cache_stats`** - View cache statistics
-- **`clear_mapping_cache`** - Clear cached mappings
-- **`preload_mapping_cache`** - Preload cache for better performance
+ID-to-name mapping is applied automatically to all search and detail tool results. No additional tools are needed — the `_enhanced` field is added transparently to every response that contains company or resource IDs.
 
 ### Performance Features
 
@@ -234,29 +441,54 @@ npm run test:mapping
 
 For detailed mapping documentation, see [docs/mapping.md](docs/mapping.md).
 
+## HTTP Transport
+
+The server supports the MCP Streamable HTTP transport for remote deployments (e.g., Docker, cloud hosting). Set `MCP_TRANSPORT=http` to enable it.
+
+```bash
+# Start with HTTP transport
+MCP_TRANSPORT=http MCP_HTTP_PORT=8080 node dist/index.js
+```
+
+The HTTP transport exposes:
+- `POST /mcp` — MCP Streamable HTTP endpoint
+- `GET /health` — Health check (returns `{"status":"ok"}`)
+
+Clients must send requests to `/mcp` with `Accept: application/json, text/event-stream` headers per the MCP Streamable HTTP specification.
+
 ## Docker Deployment
+
+The Docker image uses HTTP transport by default (port 8080) with a built-in health check.
 
 ### Using Pre-built Image from GitHub Container Registry
 
+The Docker image defaults to **HTTP transport** on port 8080 — suitable for remote/server deployments where clients connect over the network.
+
 ```bash
 # Pull the latest image
-docker pull ghcr.io/asachs01/autotask-mcp:latest
+docker pull ghcr.io/wyre-technology/autotask-mcp:latest
 
-# Run container with your credentials
+# Run container with HTTP transport (default)
 docker run -d \
   --name autotask-mcp \
+  -p 8080:8080 \
   -e AUTOTASK_USERNAME="your-api-user@example.com" \
   -e AUTOTASK_SECRET="your-secret-key" \
   -e AUTOTASK_INTEGRATION_CODE="your-integration-code" \
   --restart unless-stopped \
-  ghcr.io/asachs01/autotask-mcp:latest
+  ghcr.io/wyre-technology/autotask-mcp:latest
+
+# Verify it's running
+curl http://localhost:8080/health
 ```
+
+For **stdio** usage with Claude Desktop, see [Installation Option 2](#option-2-docker).
 
 ### Quick Start (From Source)
 
 ```bash
 # Clone repository
-git clone https://github.com/asachs01/autotask-mcp.git
+git clone https://github.com/wyre-technology/autotask-mcp.git
 cd autotask-mcp
 
 # Create environment file
@@ -288,246 +520,12 @@ docker run -d \
 docker compose --profile dev up autotask-mcp-dev
 ```
 
-## Claude Desktop Integration
-
-This section explains how to connect the Autotask MCP Server to Claude Desktop for seamless AI-powered Autotask interactions.
-
-### Prerequisites
-
-1. **Claude Desktop**: Download and install [Claude Desktop](https://claude.ai/desktop)
-2. **MCP Server Running**: Have the Autotask MCP server running locally or in Docker
-3. **Autotask Credentials**: Valid Autotask API credentials configured
-
-### Configuration Steps
-
-#### 1. Locate Claude Desktop Configuration
-
-The Claude Desktop configuration file location varies by operating system:
-
-- **macOS**: `~/Library/Application Support/Claude/claude_desktop_config.json`
-- **Windows**: `%APPDATA%\Claude\claude_desktop_config.json`
-- **Linux**: `~/.config/Claude/claude_desktop_config.json`
-
-#### 2. Configure MCP Server Connection
-
-Add the Autotask MCP server to your Claude Desktop configuration:
-
-**For Local Development:**
-```json
-{
-  "mcpServers": {
-    "autotask": {
-      "command": "node",
-      "args": ["/path/to/autotask-mcp/dist/index.js"],
-      "env": {
-        "AUTOTASK_USERNAME": "your-api-username@company.com",
-        "AUTOTASK_SECRET": "your-api-secret",
-        "AUTOTASK_INTEGRATION_CODE": "your-integration-code"
-      }
-    }
-  }
-}
-```
-
-**For Docker Deployment (GitHub Container Registry):**
-```json
-{
-  "mcpServers": {
-    "autotask": {
-      "command": "docker",
-      "args": [
-        "run", "--rm", "-i",
-        "-e", "AUTOTASK_USERNAME=your-api-username@company.com",
-        "-e", "AUTOTASK_SECRET=your-api-secret",
-        "-e", "AUTOTASK_INTEGRATION_CODE=your-integration-code",
-        "ghcr.io/asachs01/autotask-mcp:latest"
-      ]
-    }
-  }
-}
-```
-
-**For NPM Global Installation:**
-```json
-{
-  "mcpServers": {
-    "autotask": {
-      "command": "npx",
-      "args": ["autotask-mcp"],
-      "env": {
-        "AUTOTASK_USERNAME": "your-api-username@company.com",
-        "AUTOTASK_SECRET": "your-api-secret",
-        "AUTOTASK_INTEGRATION_CODE": "your-integration-code"
-      }
-    }
-  }
-}
-```
-
-#### 3. Restart Claude Desktop
-
-After updating the configuration:
-1. Completely quit Claude Desktop
-2. Restart the application
-3. Verify the connection in the Claude interface
-
-### Verification
-
-#### Check MCP Server Status
-
-Look for the MCP server indicator in Claude Desktop:
-- **Connected**: Green indicator with "autotask" label
-- **Disconnected**: Red indicator or missing server
-
-#### Test Basic Functionality
-
-Try these example prompts in Claude:
-
-```
-Show me all companies in Autotask
-```
-
-```
-Create a new ticket for Company ID 123 with title "Server maintenance"
-```
-
-```
-Search for contacts with email containing "@example.com"
-```
-
-### Available MCP Resources
-
-Once connected, Claude can access these Autotask resources:
-
-#### Companies
-- `autotask://companies` - List all companies
-- `autotask://companies/{id}` - Get specific company details
-
-#### Contacts
-- `autotask://contacts` - List all contacts
-- `autotask://contacts/{id}` - Get specific contact details
-
-#### Tickets
-- `autotask://tickets` - List all tickets
-- `autotask://tickets/{id}` - Get specific ticket details
-
-#### Time Entries
-- `autotask://time-entries` - List all time entries
-
-### Available MCP Tools
-
-Claude can perform these actions via MCP tools:
-
-#### Company Operations
-- **search_companies**: Find companies with filters
-- **create_company**: Create new companies
-- **update_company**: Modify existing companies
-
-#### Contact Operations
-- **search_contacts**: Find contacts with filters
-- **create_contact**: Create new contacts
-
-#### Ticket Operations
-- **search_tickets**: Find tickets with filters
-- **create_ticket**: Create new tickets
-
-#### Time Entry Operations
-- **create_time_entry**: Log time entries
-
-#### Utility Operations
-- **test_connection**: Verify Autotask API connectivity
-
-### Example Usage Scenarios
-
-#### 1. Ticket Management
-```
-Claude, show me all open tickets assigned to John Doe and create a summary report
-```
-
-#### 2. Customer Information
-```
-Find the contact information for ACME Corporation and show me their recent tickets
-```
-
-#### 3. Time Tracking
-```
-Create a time entry for 2 hours of work on ticket #12345 with description "Database optimization"
-```
-
-#### 4. Company Analysis
-```
-Show me all companies created in the last 30 days and their primary contacts
-```
-
-### Troubleshooting Claude Integration
-
-#### Connection Issues
-
-**Problem**: MCP server not appearing in Claude
-**Solutions**:
-1. Check configuration file syntax (valid JSON)
-2. Verify file path in the configuration
-3. Ensure environment variables are set correctly
-4. Restart Claude Desktop completely
-
-**Problem**: Authentication errors
-**Solutions**:
-1. Verify Autotask credentials are correct
-2. Check API user permissions in Autotask
-3. Ensure integration code is valid
-
-#### Performance Issues
-
-**Problem**: Slow responses from Claude
-**Solutions**:
-1. Check network connectivity to Autotask API
-2. Monitor server logs for performance bottlenecks
-3. Consider implementing caching for frequently accessed data
-
-#### Debug Mode
-
-Enable debug logging for troubleshooting:
-
-```json
-{
-  "mcpServers": {
-    "autotask": {
-      "command": "node",
-      "args": ["/path/to/autotask-mcp/dist/index.js"],
-      "env": {
-        "AUTOTASK_USERNAME": "your-username",
-        "AUTOTASK_SECRET": "your-secret",
-        "AUTOTASK_INTEGRATION_CODE": "your-code",
-        "LOG_LEVEL": "debug"
-      }
-    }
-  }
-}
-```
-
-### Security Considerations
-
-#### Credential Management
-- Store credentials in environment variables, not directly in config
-- Use `.env` files for local development
-- Consider using secrets management for production
-
-#### Network Security
-- Run MCP server in isolated network environments
-- Use HTTPS for all API communications
-- Monitor and log all API access
-
-#### Access Control
-- Limit Autotask API user permissions to minimum required
-- Regular rotation of API credentials
-- Monitor API usage patterns
-
 ## Development
 
 ### Setup
 
 ```bash
-git clone https://github.com/your-org/autotask-mcp.git
+git clone https://github.com/wyre-technology/autotask-mcp.git
 cd autotask-mcp
 npm install
 ```
@@ -553,12 +551,14 @@ autotask-mcp/
 │   ├── mcp/               # MCP server implementation
 │   ├── services/          # Autotask service layer
 │   ├── types/             # TypeScript type definitions
-│   ├── utils/             # Utility functions
-│   └── index.ts           # Main entry point
+│   ├── utils/             # Utility functions (config, logger, cache)
+│   ├── entry.ts           # Entry point (stdout guard + .env loader)
+│   └── index.ts           # Server bootstrap (config, logger, server init)
 ├── tests/                 # Test files
-├── plans/                 # Project documentation (gitignored)
-├── prompt_logs/           # Development logs (gitignored)
-├── Dockerfile             # Container definition
+├── scripts/               # Build and packaging scripts
+│   └── pack-mcpb.js       # MCPB bundle creation
+├── manifest.json          # MCPB manifest for desktop distribution
+├── Dockerfile             # Container definition (HTTP transport)
 ├── docker-compose.yml     # Multi-service orchestration
 └── package.json          # Project configuration
 ```
@@ -603,9 +603,12 @@ npm test -- tests/autotask-service.test.ts
 | `AUTOTASK_INTEGRATION_CODE` | ✅ | - | Autotask integration code |
 | `AUTOTASK_API_URL` | ❌ | Auto-detected | Autotask API endpoint URL |
 | `MCP_SERVER_NAME` | ❌ | `autotask-mcp` | MCP server name |
-| `MCP_SERVER_VERSION` | ❌ | `1.0.0` | MCP server version |
+| `MCP_TRANSPORT` | ❌ | `stdio` | Transport type (`stdio` or `http`) |
+| `MCP_HTTP_PORT` | ❌ | `8080` | HTTP transport port |
+| `MCP_HTTP_HOST` | ❌ | `0.0.0.0` | HTTP transport bind address |
 | `LOG_LEVEL` | ❌ | `info` | Logging level |
 | `LOG_FORMAT` | ❌ | `simple` | Log output format |
+| `AUTOTASK_ENHANCE_CONCURRENCY` | ❌ | `3` | Max concurrent Autotask API calls used to resolve company/resource names on search results. Kept low to stay under Autotask's concurrent-thread limit. |
 | `NODE_ENV` | ❌ | `development` | Node.js environment |
 
 ### Logging Levels
@@ -619,6 +622,36 @@ npm test -- tests/autotask-service.test.ts
 
 - `simple`: Human-readable console output
 - `json`: Structured JSON output (recommended for production)
+
+## Rate Limits
+
+Autotask enforces per-integration-code API thresholds on a rolling 1-hour window:
+
+- **~10,000 req/hr (soft)** — warning email, sporadic `HTTP 429` responses
+- **~20,000 req/hr (hard)** — sustained `HTTP 429` until the window rolls
+
+LLM-driven workflows fan out easily — "status report on all open projects with notes" can issue hundreds of requests across a few minutes. The server tries to make this safer:
+
+- **429 responses are surfaced as structured errors.** Tool results carry `error_type: "rate_limited"` and a `retry_after_seconds` field parsed from Autotask's `Retry-After` header. The error message explicitly tells the LLM **not to retry** and to ask the user to scope the query — this prevents repeated retries from extending the cooldown.
+- **Fan-out tool descriptions include rate-limit tips.** Tools that are commonly looped over (`autotask_search_ticket_notes`, `autotask_search_project_notes`, `autotask_search_company_notes`, `autotask_search_time_entries`, `autotask_search_ticket_attachments`) include a hint reminding the LLM to scope the parent record list before iterating.
+
+### Raising the limit
+
+Per-integration thresholds can be increased in Autotask:
+
+1. Autotask Admin → **Resources/Users (HR) → Resources**
+2. Edit the dedicated API user → **Workflow Rules → API Tracking Identifier**
+3. Adjust the threshold for the integration code your MCP server uses
+
+This is the right answer when a single integration code is shared between Claude/Copilot/etc. and other tooling. For LLM-heavy workloads, dedicate a separate API user (and integration code) so a fan-out from one client doesn't starve others.
+
+### Patterns that help
+
+- **Always scope by date range** when searching notes, time entries, attachments. Even a 30-day window can drop call count by an order of magnitude.
+- **Cache parent lookups.** If you're iterating over 100 tickets, fetch the ticket list once and reuse it across follow-up queries; don't re-search per child.
+- **Use `autotask_get_field_info`** to discover picklist values once per session rather than refetching them per call.
+
+If you're seeing threshold warnings from Autotask but the server seems fine, the LLM driver is probably issuing fan-out patterns. Tighten the prompt to scope before iterating.
 
 ## Troubleshooting
 
@@ -661,12 +694,66 @@ LOG_LEVEL=debug npm start
 Test server connectivity:
 
 ```bash
-# Test basic functionality
+# Run test suite
 npm run test
 
-# Test API connection (requires credentials)
+# For HTTP transport, check the health endpoint
+curl http://localhost:8080/health
+# Returns: {"status":"ok"}
+
+# Test API connection with debug logging
 LOG_LEVEL=debug npm start
 ```
+
+### Autotask API Rate Limits
+
+**Problem**: `429 Too Many Requests` or "thread limit exceeded" errors when Claude queries aggressively
+
+Autotask enforces **3 concurrent threads per endpoint per API tracking identifier**. When an LLM issues multiple tool calls simultaneously (e.g., searching tickets, companies, and contacts at once), requests can pile up and hit this limit.
+
+**Built-in mitigation**: The underlying `autotask-node` SDK automatically queues excess requests rather than failing immediately. Requests wait for a slot to free up, so you generally won't see 429 errors — but you may notice slower responses under heavy load.
+
+**Critical for team/multi-user deployments**: If multiple users or the MCP Gateway share the **same API credentials**, they compete for the same 3-thread budget. This can cause noticeable slowdowns and, in severe cases, queued requests that time out.
+
+**Solution — one API key per team**: Create a dedicated Autotask API user per team or integration. Each user has an independent `integrationCode` with its own thread budget:
+
+1. **Admin > Resources (Users) > Resources/Users** → Add Resource
+2. Set Security Level to **API User**
+3. Note the username, secret, and integration code
+4. Set `AUTOTASK_USERNAME`, `AUTOTASK_SECRET`, and `AUTOTASK_INTEGRATION_CODE` per team
+
+```
+Support Team  → AUTOTASK_INTEGRATION_CODE=SUPPORT_TEAM_CODE  (3 threads)
+Projects Team → AUTOTASK_INTEGRATION_CODE=PROJECTS_TEAM_CODE (3 threads, independent)
+```
+
+Additionally, Autotask limits **10,000 total requests per hour** across all integrations hitting your tenant. If you hit this limit, all integrations will start receiving 429s — another reason to use targeted queries with appropriate filters.
+
+### MCP Client Issues
+
+**Problem**: MCP server not appearing in Claude Desktop
+**Solutions**:
+1. Check configuration file syntax (valid JSON)
+2. Verify file path in the configuration
+3. Ensure environment variables are set correctly
+4. Restart Claude Desktop completely
+
+**Problem**: "Invalid JSON-RPC message: [dotenv@...] injecting env" / Server disconnected
+**Cause**: The `autotask-node` library calls `dotenv.config()` at module load time. dotenv v17+ writes status messages via `console.log` to stdout, which corrupts the MCP stdio JSON-RPC channel.
+**Solution**: Ensure you're using `dist/entry.js` (not `dist/index.js`) as the entry point. The entry wrapper redirects `console.log` to stderr before any libraries load.
+
+**Problem**: Slow responses
+**Solutions**:
+1. Check network connectivity to Autotask API
+2. Enable debug logging (`LOG_LEVEL=debug`) to identify bottlenecks
+3. The server caches company/resource names for 30 minutes automatically
+
+### Security Best Practices
+
+- Store credentials in environment variables, not directly in config files
+- Limit Autotask API user permissions to the minimum required
+- Rotate API credentials regularly
+- For Docker deployments, use secrets management rather than plain environment variables
 
 ## Contributing
 
@@ -686,13 +773,24 @@ LOG_LEVEL=debug npm start
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+This project is licensed under the **Apache License 2.0**. See the [LICENSE](LICENSE) file for details.
+
+### Contributor License Agreement
+
+By submitting a pull request, you agree to the terms of our [Contributor License Agreement](CLA.md). This ensures that contributions can be properly licensed and that you have the right to submit the code.
+
+## Contributors
+
+| Avatar | Name | Contributions |
+| --- | --- | --- |
+| <a href="https://github.com/asachs01"><img src="https://github.com/asachs01.png" width="60" /></a> | [@asachs01](https://github.com/asachs01) | Maintainer |
+| <a href="https://github.com/Baphomet480"><img src="https://github.com/Baphomet480.png" width="60" /></a> | [@Baphomet480](https://github.com/Baphomet480) | CLI bin fix |
 
 ## Support
 
-- 📚 [Documentation](https://github.com/asachs01/autotask-mcp/wiki)
-- 🐛 [Issue Tracker](https://github.com/asachs01/autotask-mcp/issues)
-- 💬 [Discussions](https://github.com/asachs01/autotask-mcp/discussions)
+- 📚 [Documentation](https://github.com/wyre-technology/autotask-mcp/wiki)
+- 🐛 [Issue Tracker](https://github.com/wyre-technology/autotask-mcp/issues)
+- 💬 [Discussions](https://github.com/wyre-technology/autotask-mcp/discussions)
 
 ## Acknowledgments
 
@@ -702,4 +800,4 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ---
 
-Built with ❤️ for the Autotask and AI community 
+Built by [WYRE Technology](https://github.com/wyre-technology) — part of the [MSP Claude Plugins](https://github.com/wyre-technology/msp-claude-plugins) ecosystem 

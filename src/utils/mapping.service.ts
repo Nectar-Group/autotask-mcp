@@ -22,18 +22,32 @@ export interface MappingResult {
 }
 
 export class MappingService {
-  private static instance: MappingService | null = null;
-  private static isInitializing: boolean = false;
-  
+  // Per-instance init promise (coalesces concurrent initializeCache calls
+  // on the SAME instance). Must NOT be static — a class-level singleton
+  // would bind every tenant's request to whichever AutotaskService warmed
+  // the cache first, leaking that tenant's company/resource names into
+  // every other tenant's response. See incident on 2026-06-03.
+  private initPromise: Promise<void> | null = null;
+  private refreshCompanyPromise: Promise<void> | null = null;
+  private refreshResourcePromise: Promise<void> | null = null;
+
   private cache: MappingCache;
   private autotaskService: AutotaskService;
   private logger: Logger;
   private cacheExpiryMs: number;
+  // When true, skip the eager pre-warm and rely on per-ID direct-get fallbacks.
+  private lazyLoading: boolean;
 
-  private constructor(autotaskService: AutotaskService, logger: Logger, cacheExpiryMs: number = 30 * 60 * 1000) { // 30 minutes default
+  public constructor(
+    autotaskService: AutotaskService,
+    logger: Logger,
+    cacheExpiryMs: number = 30 * 60 * 1000,
+    lazyLoading: boolean = false,
+  ) { // 30 minutes default
     this.autotaskService = autotaskService;
     this.logger = logger;
     this.cacheExpiryMs = cacheExpiryMs;
+    this.lazyLoading = lazyLoading;
     this.cache = {
       companies: new Map<number, string>(),
       resources: new Map<number, string>(),
@@ -45,46 +59,59 @@ export class MappingService {
   }
 
   /**
-   * Get singleton instance
+   * Construct and initialize a per-tenant MappingService instance.
+   *
+   * **MUST be called once per AutotaskService (i.e. once per request in
+   * gateway mode), NEVER reused across tenants.** Concurrent calls on the
+   * same instance coalesce via `this.initPromise`; cross-instance calls are
+   * fully independent.
+   *
+   * Replaces the previous static-singleton `getInstance()` which leaked
+   * cached company/resource names across tenants (incident 2026-06-03).
    */
-  public static async getInstance(autotaskService: AutotaskService, logger: Logger): Promise<MappingService> {
-    if (MappingService.instance) {
-      return MappingService.instance;
-    }
-
-    if (MappingService.isInitializing) {
-      // Wait for initialization to complete
-      return new Promise((resolve) => {
-        const checkInit = () => {
-          if (MappingService.instance) {
-            resolve(MappingService.instance);
-          } else {
-            setTimeout(checkInit, 100);
-          }
-        };
-        checkInit();
-      });
-    }
-
-    MappingService.isInitializing = true;
-    MappingService.instance = new MappingService(autotaskService, logger);
-    
-    try {
-      await MappingService.instance.initializeCache();
-    } catch (error) {
-      MappingService.instance = null;
-      MappingService.isInitializing = false;
-      throw error;
-    }
-    
-    MappingService.isInitializing = false;
-    return MappingService.instance;
+  public static async create(
+    autotaskService: AutotaskService,
+    logger: Logger,
+    options: { lazyLoading?: boolean } = {},
+  ): Promise<MappingService> {
+    const instance = new MappingService(
+      autotaskService,
+      logger,
+      undefined,
+      options.lazyLoading,
+    );
+    await instance.ensureInitialized();
+    return instance;
   }
 
   /**
-   * Initialize cache with company and resource data
+   * Per-instance init coalescing. Multiple concurrent callers on the same
+   * MappingService share one initializeCache promise; once it resolves the
+   * promise is cleared so a future cache-clear can re-init.
+   */
+  public async ensureInitialized(): Promise<void> {
+    if (!this.initPromise) {
+      this.initPromise = this.initializeCache().catch((err) => {
+        this.initPromise = null;
+        throw err;
+      });
+    }
+    return this.initPromise;
+  }
+
+  /**
+   * Initialize cache with company and resource data. When `lazyLoading` is set,
+   * skip the eager pre-warm entirely — the cache stays empty and every
+   * `getCompanyName()` / `getResourceName()` call falls through to the
+   * per-record direct-get path. Cheaper at startup, more expensive per call.
    */
   private async initializeCache(): Promise<void> {
+    if (this.lazyLoading) {
+      this.logger.info(
+        'MappingService: LAZY_LOADING enabled — skipping cache pre-warm. ID-to-name lookups will hit the API per record.'
+      );
+      return;
+    }
     if (this.isCacheValid('companies') && this.isCacheValid('resources')) {
       return;
     }
@@ -117,51 +144,44 @@ export class MappingService {
   }
 
   /**
-   * Refresh cache if needed (expired)
+   * Refresh cache if needed (expired). Each refresh method coalesces concurrent
+   * callers internally via refreshCompanyPromise / refreshResourcePromise.
    */
   private async refreshCacheIfNeeded(): Promise<void> {
+    if (this.lazyLoading) return;
     const promises: Promise<void>[] = [];
-    
-    if (!this.isCacheValid('companies')) {
-      promises.push(this.refreshCompanyCache());
-    }
-    
-    if (!this.isCacheValid('resources')) {
-      promises.push(this.refreshResourceCache());
-    }
-    
-    if (promises.length > 0) {
-      await Promise.all(promises);
-    }
+    if (!this.isCacheValid('companies')) promises.push(this.refreshCompanyCache());
+    if (!this.isCacheValid('resources')) promises.push(this.refreshResourceCache());
+    if (promises.length > 0) await Promise.all(promises);
   }
 
   /**
-   * Get company name by ID with fallback lookup
+   * Get company name by ID.
+   *
+   * Cache is the source of truth — populated by full paginated `list()` in
+   * `refreshCompanyCache`. A single-record `getCompany(id)` fallback exists
+   * for IDs added between refresh windows, but its result is NOT written to
+   * the cache: direct-get results have been observed to disagree with the
+   * paginated list for merged/renamed companies, and caching the bad value
+   * would then be served to every subsequent caller for 30 minutes.
    */
   public async getCompanyName(companyId: number): Promise<string | null> {
     try {
       await this.refreshCacheIfNeeded();
-      
-      // Try cache first
+
       const cachedName = this.cache.companies.get(companyId);
       if (cachedName) {
         return cachedName;
       }
-      
-      // Fallback to direct API lookup
-      this.logger.debug(`Company ${companyId} not in cache, doing direct lookup`);
-      const companies = await this.autotaskService.searchCompanies({ 
-        // No searchTerm needed - we'll find by ID after getting results
-        pageSize: 0 // Get all companies to find this specific one
-      });
-      
-      const company = companies.find((c: any) => c.id === companyId);
-      if (company && company.companyName) {
-        // Add to cache for future use
-        this.cache.companies.set(companyId, company.companyName);
+
+      this.logger.warn(
+        `Company ${companyId} missing from paginated cache (size=${this.cache.companies.size}); falling back to direct lookup. Result will NOT be cached.`
+      );
+      const company = await this.autotaskService.getCompany(companyId);
+      if (company?.companyName) {
         return company.companyName;
       }
-      
+
       return null;
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
@@ -203,7 +223,8 @@ export class MappingService {
         this.logger.debug(`Direct resource lookup failed for ${resourceId}:`, directError);
       }
       
-      return null;
+      this.cache.resources.set(resourceId, 'Unknown Resource');
+      return 'Unknown Resource';
     } catch (error) {
       this.logger.error(`Failed to get resource name for ${resourceId}:`, error);
       return null;
@@ -211,92 +232,93 @@ export class MappingService {
   }
 
   /**
-   * Get multiple company names in a single call
-   */
-  async getCompanyNames(companyIds: number[]): Promise<(string | null)[]> {
-    const results = await Promise.all(
-      companyIds.map(id => this.getCompanyName(id))
-    );
-    return results;
-  }
-
-  /**
-   * Get multiple resource names in a single call
-   */
-  async getResourceNames(resourceIds: number[]): Promise<(string | null)[]> {
-    const results = await Promise.all(
-      resourceIds.map(id => this.getResourceName(id))
-    );
-    return results;
-  }
-
-  /**
    * Refresh the company cache
    */
   private async refreshCompanyCache(): Promise<void> {
-    if (this.isCacheValid('companies')) {
-      return; // Cache is still valid
-    }
+    if (this.isCacheValid('companies')) return;
+    if (this.refreshCompanyPromise) return this.refreshCompanyPromise;
 
-    try {
-      this.logger.info('Refreshing company cache...');
-      
-      // Use pagination-by-default to get ALL companies for complete accuracy
-      const companies = await this.autotaskService.searchCompanies({
-        // No pageSize specified - gets ALL companies via pagination by default
-      });
+    this.refreshCompanyPromise = (async () => {
+      try {
+        this.logger.info('Refreshing company cache...');
 
-      this.cache.companies.clear();
-      
-      for (const company of companies) {
-        if (company.id && company.companyName) {
-          this.cache.companies.set(company.id, company.companyName);
+        // Bulk-load every company via the dedicated listAllCompanies path.
+        // http.query walks Autotask's cursor (pageDetails.nextPageUrl)
+        // internally until it hits maxRecords or runs out of pages. The
+        // previous implementation looped on `searchCompanies({ page, pageSize })`
+        // expecting offset semantics, but searchCompanies' `page` arg was
+        // silently dropped — every iteration re-fetched the same page 1.
+        // Cache ended up with the first ~200 companies after ~100 wasted
+        // API calls (see issue #101).
+        //
+        // Atomic-swap: build a fresh Map and only assign on full success,
+        // so a partial failure can't replace a good cache with a shorter one.
+        const fresh = new Map<number, string>();
+        const all = await this.autotaskService.listAllCompanies();
+        for (const company of all) {
+          if (company.id != null && company.companyName) {
+            fresh.set(company.id, company.companyName);
+          }
         }
+
+        this.cache.companies = fresh;
+        this.cache.lastUpdated.companies = new Date();
+        this.logger.info(
+          `Company cache refreshed with ${this.cache.companies.size} entries`
+        );
+
+      } catch (error) {
+        this.logger.error('Failed to refresh company cache:', error);
+        // Don't throw — keep any previously valid cache rather than wiping it.
+      } finally {
+        this.refreshCompanyPromise = null;
       }
-
-      this.cache.lastUpdated.companies = new Date();
-      this.logger.info(`Company cache refreshed with ${this.cache.companies.size} entries (COMPLETE dataset)`);
-
-    } catch (error) {
-      this.logger.error('Failed to refresh company cache:', error);
-      // Don't throw error - allow fallback to direct lookup
-    }
+    })();
+    return this.refreshCompanyPromise;
   }
 
   /**
    * Refresh resource cache safely (handle endpoint limitations)
    */
   private async refreshResourceCache(): Promise<void> {
-    try {
-      this.logger.debug('Refreshing resource cache...');
-      
-      // Note: Some Autotask instances don't support resource listing via REST API
-      // This is a known limitation - see Autotask documentation
-      const resources = await this.autotaskService.searchResources({ pageSize: 0 });
-      
-      this.cache.resources.clear();
-      for (const resource of resources) {
-        if (resource.id && resource.firstName && resource.lastName) {
-          const fullName = `${resource.firstName} ${resource.lastName}`.trim();
-          this.cache.resources.set(resource.id, fullName);
+    if (this.isCacheValid('resources')) return;
+    if (this.refreshResourcePromise) return this.refreshResourcePromise;
+
+    this.refreshResourcePromise = (async () => {
+      try {
+        this.logger.debug('Refreshing resource cache...');
+        
+        // Note: Some Autotask instances don't support resource listing via REST API
+        // This is a known limitation - see Autotask documentation
+        const resources = await this.autotaskService.searchResources({ pageSize: 0 });
+        
+        this.cache.resources.clear();
+        for (const resource of resources) {
+          if (resource.id && resource.firstName && resource.lastName) {
+            const fullName = `${resource.firstName} ${resource.lastName}`.trim();
+            this.cache.resources.set(resource.id, fullName);
+          }
         }
-      }
-      
-      this.cache.lastUpdated.resources = new Date();
-      this.logger.info(`Resource cache refreshed: ${this.cache.resources.size} resources`);
-      
-    } catch (error) {
-      // Handle the common case where Resources endpoint returns 405 Method Not Allowed
-      if ((error as any)?.response?.status === 405) {
-        this.logger.warn('Resources endpoint not available (405 Method Not Allowed) - this is common in Autotask REST API. Resource name mapping will be disabled.');
+        
+        this.cache.lastUpdated.resources = new Date();
+        this.logger.info(`Resource cache refreshed: ${this.cache.resources.size} resources`);
+        
+      } catch (error) {
+        // Handle the common case where Resources endpoint returns 405 Method Not Allowed
+        if ((error as any)?.response?.status === 405) {
+          this.logger.warn('Resources endpoint not available (405 Method Not Allowed) - this is common in Autotask REST API. Resource name mapping will be disabled.');
+          this.cache.lastUpdated.resources = new Date(); // Mark as "refreshed" to prevent retry loops
+          return;
+        }
+        
+        // Handle other resource endpoint errors gracefully
+        this.logger.error('Failed to refresh resource cache, continuing without resource names:', error);
         this.cache.lastUpdated.resources = new Date(); // Mark as "refreshed" to prevent retry loops
-        return;
+      } finally {
+        this.refreshResourcePromise = null;
       }
-      
-      // Handle other resource endpoint errors gracefully
-      this.logger.error('Failed to refresh resource cache, continuing without resource names:', error);
-      this.cache.lastUpdated.resources = new Date(); // Mark as "refreshed" to prevent retry loops
-    }
+    })();
+    return this.refreshResourcePromise;
   }
 
   /**
@@ -308,24 +330,6 @@ export class MappingService {
     this.cache.lastUpdated.companies = null;
     this.cache.lastUpdated.resources = null;
     this.logger.info('Mapping cache cleared');
-  }
-
-  /**
-   * Clear company cache only
-   */
-  public clearCompanyCache(): void {
-    this.cache.companies.clear();
-    this.cache.lastUpdated.companies = null;
-    this.logger.info('Company cache cleared');
-  }
-
-  /**
-   * Clear resource cache only
-   */
-  public clearResourceCache(): void {
-    this.cache.resources.clear();
-    this.cache.lastUpdated.resources = null;
-    this.logger.info('Resource cache cleared');
   }
 
   /**
@@ -348,21 +352,4 @@ export class MappingService {
       },
     };
   }
-
-  /**
-   * Preload caches (useful for warming up on startup)
-   */
-  async preloadCaches(): Promise<void> {
-    this.logger.info('Preloading mapping caches...');
-    try {
-      await Promise.all([
-        this.refreshCompanyCache(),
-        this.refreshResourceCache(),
-      ]);
-      this.logger.info('Mapping caches preloaded successfully');
-    } catch (error) {
-      this.logger.error('Failed to preload caches:', error);
-      throw error;
-    }
-  }
-} 
+}
