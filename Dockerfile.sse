@@ -1,7 +1,29 @@
-FROM node:20-slim
+# Builds Nectar's own autotask-mcp fork from source, instead of `npm install -g
+# autotask-mcp`, which silently installs an unrelated third-party package that
+# happens to share the same name on the public npm registry (maintained by
+# jwaldrip, not wyre-technology - completely different codebase). That mismatch
+# meant every fix made in this repo was previously having zero effect on what
+# actually ran in Azure. This Dockerfile fixes that: it builds and runs OUR
+# code, so the null-vs-undefined search_tickets fix (and any future changes
+# here) actually reach the running container.
 
-RUN npm install -g mcp-proxy autotask-mcp
+FROM node:20-slim AS build
+WORKDIR /app
+COPY package*.json ./
+RUN npm ci
+COPY . .
+RUN npm run build
+
+FROM node:20-slim
+WORKDIR /app
+
+# mcp-proxy bridges our stdio-based MCP server to HTTP Streamable, same as before
+RUN npm install -g mcp-proxy
+
+# Only bring over what's needed to run - compiled output + prod dependencies
+COPY --from=build /app/dist ./dist
+COPY --from=build /app/package*.json ./
+RUN npm ci --omit=dev --ignore-scripts
 
 EXPOSE 8080
-
-CMD ["mcp-proxy", "--host=0.0.0.0", "--port=8080", "--server=stream", "--streamEndpoint=/mcp", "autotask-mcp"]
+CMD ["mcp-proxy", "--host=0.0.0.0", "--port=8080", "--server=stream", "--streamEndpoint=/mcp", "node", "dist/entry.js"]
