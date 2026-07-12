@@ -838,23 +838,6 @@ export class AutotaskToolHandler {
         }
         const { companyID, ...rest } = a;
         const opts = { ...rest, ...(companyID !== undefined && { companyId: companyID }) };
-
-        // Defensive numeric coercion. Some MCP clients (confirmed: CrewAI's
-        // MCPServerAdapter as of crewai-tools 1.15.2) serialize tool-call
-        // arguments as strings even when the declared JSON schema type is
-        // "number". Autotask's query engine does an exact-type match on
-        // picklist/ID fields, so a string "5" silently matches zero rows
-        // rather than erroring - the search *looks* like it ran cleanly and
-        // simply found nothing, which is a much harder failure to diagnose
-        // than an explicit type error would have been. Coerce every numeric
-        // filter field here, at the boundary, rather than trusting the
-        // client to have sent the right JS type.
-        for (const key of ['status', 'companyId', 'contactID', 'assignedResourceID'] as const) {
-          if (opts[key] !== undefined && opts[key] !== null) {
-            opts[key] = Number(opts[key]);
-          }
-        }
-
         const r = await s.searchTickets(opts);
         return { result: r, message: `Found ${r.length} tickets` };
       }],
@@ -1489,6 +1472,52 @@ export class AutotaskToolHandler {
   }
 
   /**
+   * Defensive numeric coercion, applied to every tool call before dispatch.
+   *
+   * Some MCP clients (confirmed: CrewAI's MCPServerAdapter as of
+   * crewai-tools 1.15.2) serialize tool-call arguments as strings even when
+   * the tool's declared JSON schema says "number". Autotask's query engine
+   * does an exact-type match on picklist/ID fields used in filter queries,
+   * so a string "5" silently matches zero rows instead of erroring - the
+   * call *looks* like it ran cleanly and simply found nothing, which is a
+   * much harder failure to diagnose than an explicit type error would be.
+   *
+   * Rather than patching this handler-by-handler (which only catches
+   * whichever tool happened to get noticed), this walks the tool's own
+   * declared inputSchema - already the source of truth for what should be
+   * numeric - and coerces any property typed "number" (including the
+   * anyOf-wrapped variants used for optional fields) whose incoming value
+   * is a numeric string. Applies uniformly to all tools, not just tickets.
+   */
+  private coerceNumericArgs(toolName: string, args: Record<string, any>): Record<string, any> {
+    const def = TOOL_DEFINITIONS.find(t => t.name === toolName);
+    if (!def || !args || typeof args !== 'object') return args;
+
+    const isNumberType = (schema: any): boolean => {
+      if (!schema) return false;
+      if (schema.type === 'number') return true;
+      if (Array.isArray(schema.anyOf)) {
+        return schema.anyOf.some((s: any) => s?.type === 'number');
+      }
+      return false;
+    };
+
+    const coerced: Record<string, any> = { ...args };
+    for (const [key, schema] of Object.entries(def.inputSchema.properties || {})) {
+      const value = coerced[key];
+      if (
+        isNumberType(schema) &&
+        typeof value === 'string' &&
+        value.trim() !== '' &&
+        !Number.isNaN(Number(value))
+      ) {
+        coerced[key] = Number(value);
+      }
+    }
+    return coerced;
+  }
+
+  /**
    * Call a tool with the given arguments
    */
   async callTool(name: string, args: Record<string, any>): Promise<McpToolResult> {
@@ -1498,10 +1527,11 @@ export class AutotaskToolHandler {
       const handler = this.getDispatchTable().get(name);
       if (!handler) throw new Error(`Unknown tool: ${name}`);
 
-      const { result, message } = await handler(args);
+      const coercedArgs = this.coerceNumericArgs(name, args);
+      const { result, message } = await handler(coercedArgs);
 
       // Check for empty/not-found results and return explicit error to prevent hallucination
-      const notFoundMsg = this.buildNotFoundMessage(name, args, result);
+      const notFoundMsg = this.buildNotFoundMessage(name, coercedArgs, result);
       if (notFoundMsg) {
         this.logger.debug(`Not-found result for ${name}: ${notFoundMsg}`);
         return errorToolResult({ error: notFoundMsg, tool: name });
@@ -1513,8 +1543,8 @@ export class AutotaskToolHandler {
         const entityType = detectEntityType(name);
         if (entityType) {
           const compact = formatCompactResponse(result, entityType, {
-            page: args.page,
-            pageSize: args.pageSize,
+            page: coercedArgs.page,
+            pageSize: coercedArgs.pageSize,
           });
           compact.items = await this.enhanceItems(compact.items);
           responseText = JSON.stringify(compact);
