@@ -838,6 +838,23 @@ export class AutotaskToolHandler {
         }
         const { companyID, ...rest } = a;
         const opts = { ...rest, ...(companyID !== undefined && { companyId: companyID }) };
+
+        // Defensive numeric coercion. Some MCP clients (confirmed: CrewAI's
+        // MCPServerAdapter as of crewai-tools 1.15.2) serialize tool-call
+        // arguments as strings even when the declared JSON schema type is
+        // "number". Autotask's query engine does an exact-type match on
+        // picklist/ID fields, so a string "5" silently matches zero rows
+        // rather than erroring - the search *looks* like it ran cleanly and
+        // simply found nothing, which is a much harder failure to diagnose
+        // than an explicit type error would have been. Coerce every numeric
+        // filter field here, at the boundary, rather than trusting the
+        // client to have sent the right JS type.
+        for (const key of ['status', 'companyId', 'contactID', 'assignedResourceID'] as const) {
+          if (opts[key] !== undefined && opts[key] !== null) {
+            opts[key] = Number(opts[key]);
+          }
+        }
+
         const r = await s.searchTickets(opts);
         return { result: r, message: `Found ${r.length} tickets` };
       }],
