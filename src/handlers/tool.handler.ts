@@ -1472,6 +1472,39 @@ export class AutotaskToolHandler {
   }
 
   /**
+   * Strip explicit JSON `null` values from tool-call arguments before they
+   * reach any handler.
+   *
+   * Confirmed via live agent logs: CrewAI's MCPServerAdapter sends explicit
+   * `null` for every optional parameter the caller didn't set, rather than
+   * omitting the key entirely. Handler code throughout this file uses
+   * `!== undefined` checks to detect "was this filter provided" -
+   * `null !== undefined` is `true` in JS, so an explicit null was being read
+   * as "filter for this field equal to null" rather than "not provided".
+   *
+   * Concretely: a real search_tickets call with a correctly-typed
+   * `status: 5` also carried explicit `companyID: null` and
+   * `assignedResourceID: null`. searchTickets() built filters for status=5
+   * AND assignedResourceID=null AND companyId=null - a combination no real
+   * ticket satisfies, since every ticket belongs to a company. The search
+   * "worked" and legitimately found nothing, because the filter it was
+   * asked to run was accidentally impossible.
+   *
+   * No call site in this file relies on a caller passing `null` as a
+   * meaningful value (the `unassigned` semantics use a dedicated boolean
+   * flag, not a null passed directly), so stripping null keys entirely is
+   * safe across all tools.
+   */
+  private stripNullArgs(args: Record<string, any>): Record<string, any> {
+    if (!args || typeof args !== 'object') return args;
+    const withoutNulls: Record<string, any> = {};
+    for (const [key, value] of Object.entries(args)) {
+      if (value !== null) withoutNulls[key] = value;
+    }
+    return withoutNulls;
+  }
+
+  /**
    * Defensive numeric coercion, applied to every tool call before dispatch.
    *
    * Some MCP clients (confirmed: CrewAI's MCPServerAdapter as of
@@ -1518,6 +1551,16 @@ export class AutotaskToolHandler {
   }
 
   /**
+   * Full argument normalization applied to every tool call before dispatch:
+   * strip explicit nulls first (so "not provided" is actually absent),
+   * then coerce numeric-typed fields that arrived as strings.
+   */
+  private normalizeArgs(toolName: string, args: Record<string, any>): Record<string, any> {
+    const withoutNulls = this.stripNullArgs(args);
+    return this.coerceNumericArgs(toolName, withoutNulls);
+  }
+
+  /**
    * Call a tool with the given arguments
    */
   async callTool(name: string, args: Record<string, any>): Promise<McpToolResult> {
@@ -1527,7 +1570,7 @@ export class AutotaskToolHandler {
       const handler = this.getDispatchTable().get(name);
       if (!handler) throw new Error(`Unknown tool: ${name}`);
 
-      const coercedArgs = this.coerceNumericArgs(name, args);
+      const coercedArgs = this.normalizeArgs(name, args);
       const { result, message } = await handler(coercedArgs);
 
       // Check for empty/not-found results and return explicit error to prevent hallucination
